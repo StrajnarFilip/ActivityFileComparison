@@ -5,10 +5,15 @@
  * plot all files together, the cursors stay synchronised across charts, and the
  * legend of each chart reads as a row of "what was every device showing at this
  * point?".
+ *
+ * Dragging on any chart zooms all of them, and that shared x range doubles as
+ * the selected segment: the statistics table under each chart reports both the
+ * whole-file figures and the figures for the selection.
  */
 
 import { CHANNELS } from './model.js';
 import { xSeries, prepareSource, makeGrid, resample } from './resample.js';
+import { aggregate, rangeBounds, EMPTY } from './stats.js';
 import { duration, number } from './format.js';
 
 /** uPlot is loaded as a plain script, see index.html. @type {any} */
@@ -36,12 +41,32 @@ const MIN_GRID_POINTS = 400;
  * @typedef {({id: string, lat: number, lon: number}|null)[]} CursorPositions
  */
 
+/**
+ * A file ready to be charted: the activity plus its usable x values.
+ *
+ * @typedef {Object} PreparedActivity
+ * @property {import('./model.js').Activity} activity
+ * @property {import('./resample.js').Source} source
+ */
+
+/**
+ * One drawn channel and the table underneath it.
+ *
+ * @typedef {Object} ChartEntry
+ * @property {import('./model.js').Channel} spec
+ * @property {HTMLElement} stats
+ */
+
+/** @typedef {{min: number, max: number}} XRange */
+
 export class ChartStack {
   /**
    * @param {HTMLElement} container
    * @param {Object} hooks
    * @param {(positions: CursorPositions) => void} hooks.onCursor
    * @param {() => void} hooks.onCursorLeave
+   * @param {(label: string) => void} hooks.onSelection  Describes the selected
+   *   segment, or the empty string when the whole activity is shown.
    */
   constructor(container, hooks) {
     this.container = container;
@@ -55,6 +80,22 @@ export class ChartStack {
     this.positions = [];
     /** @type {number|null} */
     this.lastIndex = null;
+
+    /** @type {PreparedActivity[]} */
+    this.prepared = [];
+    /** @type {ChartEntry[]} */
+    this.entries = [];
+    /** @type {XRange|null} */
+    this.fullRange = null;
+    /** @type {XRange|null} */
+    this.selection = null;
+    /** Suppresses scale handling while the charts are being created. */
+    this.building = false;
+
+    /** @type {import('./model.js').XMode} */
+    this.xMode = 'elapsed';
+    /** @type {import('./model.js').UnitSystem} */
+    this.units = 'metric';
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(container);
@@ -71,6 +112,8 @@ export class ChartStack {
    */
   render(activities, xMode, units) {
     this.destroyPlots();
+    this.xMode = xMode;
+    this.units = units;
 
     const visible = activities.filter((a) => a.visible);
     const prepared = visible
@@ -83,6 +126,7 @@ export class ChartStack {
     if (prepared.length === 0) {
       this.plotted = [];
       this.positions = [];
+      this.prepared = [];
       this.renderEmpty(visible.length > 0 && xMode !== 'dist');
       return;
     }
@@ -103,6 +147,9 @@ export class ChartStack {
       Math.min(MAX_GRID_POINTS, Math.max(MIN_GRID_POINTS, longest)),
     );
 
+    this.prepared = prepared;
+    this.fullRange = { min, max };
+    this.selection = null;
     this.plotted = prepared.map((entry) => entry.activity);
     this.positions = prepared.map(({ activity, source }) =>
       activity.hasGps
@@ -122,7 +169,8 @@ export class ChartStack {
     const excluded = visible.filter((a) => !prepared.some((entry) => entry.activity === a));
     if (excluded.length > 0) this.container.append(exclusionNote(excluded, xMode));
 
-    drawn.forEach((spec, position) => {
+    this.building = true;
+    this.entries = drawn.map((spec, position) => {
       const data = [
         grid.x,
         ...prepared.map(({ activity, source }) =>
@@ -146,9 +194,114 @@ export class ChartStack {
       });
 
       this.plots.push(new uPlot(options, data, wrapper));
+
+      const stats = document.createElement('div');
+      stats.className = 'chart-stats';
+      wrapper.append(stats);
+
+      return { spec, stats };
     });
+    this.building = false;
 
     if (drawn.length === 0) this.renderEmpty(false);
+    else this.renderStats();
+  }
+
+  /**
+   * Track the x range every chart is showing. uPlot's cursor sync already
+   * applies a drag on one chart to all of them, so whichever chart reports the
+   * change is reporting the shared range.
+   *
+   * @param {any} u
+   */
+  handleScale(u) {
+    if (this.building || !this.fullRange) return;
+
+    const { min, max } = u.scales.x;
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+
+    // Treat "zoomed all the way out" as no selection rather than as a selection
+    // covering everything, so the selection columns stay meaningful.
+    const span = this.fullRange.max - this.fullRange.min;
+    const tolerance = Math.abs(span) * 1e-6;
+    const whole =
+      Math.abs(min - this.fullRange.min) <= tolerance &&
+      Math.abs(max - this.fullRange.max) <= tolerance;
+
+    /** @type {XRange|null} */
+    const next = whole ? null : { min, max };
+    if (sameRange(next, this.selection)) return;
+
+    this.selection = next;
+    this.renderStats();
+    this.hooks.onSelection(this.selectionLabel());
+  }
+
+  /** Rebuild the statistics table under every chart. */
+  renderStats() {
+    for (const entry of this.entries) {
+      entry.stats.replaceChildren(this.statsTable(entry.spec));
+    }
+  }
+
+  /**
+   * @param {import('./model.js').Channel} spec
+   * @returns {HTMLElement}
+   */
+  statsTable(spec) {
+    const unit = spec.unit(this.units);
+    const table = document.createElement('table');
+
+    const head = document.createElement('tr');
+    head.append(headerCell(spec.label, 'name'));
+    for (const label of ['Avg', 'Max', 'Avg (selected)', 'Max (selected)']) {
+      head.append(headerCell(`${label}`));
+    }
+    table.createTHead().append(head);
+
+    const body = table.createTBody();
+    for (const { activity, source } of this.prepared) {
+      if (!activity.has[spec.key]) continue;
+
+      const values = activity.track[spec.key];
+      const whole = aggregate(source, values, activity.track.time, 0, source.x.length);
+      const selected = this.selection
+        ? aggregate(
+            source,
+            values,
+            activity.track.time,
+            ...rangeBounds(source, this.selection.min, this.selection.max),
+          )
+        : EMPTY;
+
+      const row = document.createElement('tr');
+      row.append(nameCell(activity));
+      for (const value of [whole.avg, whole.max, selected.avg, selected.max]) {
+        const cell = document.createElement('td');
+        cell.textContent = Number.isFinite(value)
+          ? `${number(spec.toDisplay(value, this.units), spec.decimals)} ${unit}`
+          : '–';
+        row.append(cell);
+      }
+      body.append(row);
+    }
+
+    return table;
+  }
+
+  /** @returns {string} Description of the selected segment, empty if none. */
+  selectionLabel() {
+    if (!this.selection) return '';
+    const { min, max } = this.selection;
+    const width =
+      this.xMode === 'dist'
+        ? `${number(max - min, 2)} ${this.units === 'imperial' ? 'mi' : 'km'}`
+        : duration(max - min);
+    return `Selected ${formatX(min, this.xMode, this.units)} – ${formatX(
+      max,
+      this.xMode,
+      this.units,
+    )}  (${width})`;
   }
 
   /**
@@ -227,6 +380,11 @@ export class ChartStack {
       ],
       hooks: {
         setCursor: [(/** @type {any} */ u) => this.handleCursor(u)],
+        setScale: [
+          (/** @type {any} */ u, /** @type {string} */ key) => {
+            if (key === 'x') this.handleScale(u);
+          },
+        ],
       },
     };
   }
@@ -280,7 +438,13 @@ export class ChartStack {
   destroyPlots() {
     for (const plot of this.plots) plot.destroy();
     this.plots = [];
+    this.entries = [];
     this.lastIndex = null;
+    this.fullRange = null;
+    if (this.selection) {
+      this.selection = null;
+      this.hooks.onSelection('');
+    }
   }
 
   destroy() {
@@ -288,6 +452,46 @@ export class ChartStack {
     this.destroyPlots();
     this.container.replaceChildren();
   }
+}
+
+/**
+ * @param {XRange|null} a
+ * @param {XRange|null} b
+ */
+function sameRange(a, b) {
+  if (a === null || b === null) return a === b;
+  return a.min === b.min && a.max === b.max;
+}
+
+/**
+ * @param {string} text
+ * @param {string} [className]
+ * @returns {HTMLTableCellElement}
+ */
+function headerCell(text, className) {
+  const cell = document.createElement('th');
+  cell.scope = 'col';
+  cell.textContent = text;
+  if (className) cell.className = className;
+  return cell;
+}
+
+/**
+ * @param {import('./model.js').Activity} activity
+ * @returns {HTMLTableCellElement}
+ */
+function nameCell(activity) {
+  const cell = document.createElement('th');
+  cell.scope = 'row';
+  cell.className = 'name';
+  cell.title = activity.name;
+
+  const swatch = document.createElement('span');
+  swatch.className = 'swatch';
+  swatch.style.background = activity.color;
+
+  cell.append(swatch, document.createTextNode(activity.name));
+  return cell;
 }
 
 /**

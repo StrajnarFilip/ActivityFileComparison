@@ -32,6 +32,11 @@ own.
 over any of them and every chart, plus the map, shows what each file recorded at
 that point. Drag to zoom, double-click to reset.
 
+**Segment statistics.** Under every chart is a table giving each file's average
+and maximum for that channel, both over the whole file and over the selected
+segment. Dragging across any chart selects a segment — all the charts follow, and
+every table updates — and double-clicking clears it.
+
 **X axis.** Three modes:
 
 | Mode | Use it when |
@@ -125,8 +130,9 @@ npm run testdata   # regenerate testdata/
 
 `npm test` drives Chromium through the whole app: it loads all three sample
 files, then checks that the derived totals agree across formats, that colours
-match between the charts and the table, that the cursor reads every file, and
-that the axis, unit, visibility and removal controls work.
+match between the charts and the table, that the cursor reads every file, that
+dragging a segment updates every chart's statistics, and that the axis, unit,
+visibility and removal controls work.
 
 ## Notes
 

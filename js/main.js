@@ -37,6 +37,7 @@ const dom = {
   map: required('map'),
   mapPanel: required('map-panel'),
   messages: required('messages'),
+  selectionInfo: required('selection-info'),
   overlay: required('drop-overlay'),
   fileInput: /** @type {HTMLInputElement} */ (required('file-input')),
   clearAll: required('clear-all'),
@@ -152,6 +153,9 @@ function render() {
     charts = new ChartStack(dom.charts, {
       onCursor: (positions) => map?.showCursor(positions),
       onCursorLeave: () => map?.hideCursor(),
+      onSelection: (label) => {
+        dom.selectionInfo.textContent = label;
+      },
     });
   }
   charts.render(state.activities, state.xMode, state.units);

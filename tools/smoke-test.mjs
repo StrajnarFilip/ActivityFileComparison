@@ -121,6 +121,74 @@ check(
   readout.join(' | '),
 );
 
+// Every chart carries a statistics table, empty of selection figures until a
+// segment is selected.
+const statsHeaders = await page.$$eval('.chart:first-child .chart-stats thead th', (els) =>
+  els.map((e) => e.textContent),
+);
+check(
+  'each chart has a statistics table',
+  statsHeaders.join('|') === 'Power|Avg|Max|Avg (selected)|Max (selected)' &&
+    (await page.$$('.chart-stats table')).length === 6,
+  statsHeaders.join(', '),
+);
+const beforeSelection = await page.$$eval('.chart:first-child .chart-stats tbody tr', (rows) =>
+  rows.map((r) => [...r.querySelectorAll('td')].map((c) => (c.textContent ?? '').trim())),
+);
+check(
+  'whole-file figures are shown, selection figures are not',
+  beforeSelection.every((r) => r[0].endsWith('W') && r[1].endsWith('W') && r[2] === '–' && r[3] === '–'),
+  beforeSelection.map((r) => r.join(' ')).join(' / '),
+);
+
+// Drag a segment: every chart follows, and the selection columns fill in.
+await page.locator('.chart .u-over').first().scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+const drag = await page.locator('.chart .u-over').first().boundingBox();
+if (!drag) throw new Error('no chart to drag on');
+await page.mouse.move(drag.x + drag.width * 0.1, drag.y + drag.height / 2);
+await page.mouse.down();
+await page.mouse.move(drag.x + drag.width * 0.25, drag.y + drag.height / 2, { steps: 8 });
+await page.mouse.move(drag.x + drag.width * 0.4, drag.y + drag.height / 2, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(700);
+
+const label = await page.$eval('#selection-info', (e) => (e.textContent ?? '').trim());
+check('the selected segment is reported', /^Selected \d+:\d\d – \d+:\d\d/.test(label), label);
+
+const selected = await page.$$eval('.chart:first-child .chart-stats tbody tr', (rows) =>
+  rows.map((r) =>
+    [...r.querySelectorAll('td')].map((c) => Number.parseFloat((c.textContent ?? '').trim())),
+  ),
+);
+check(
+  'selection figures appear and stay within the whole-file figures',
+  selected.length === 3 &&
+    selected.every(([avg, max, selAvg, selMax]) => selAvg > 0 && selMax > 0 && selMax <= max && avg > 0),
+  selected.map((r) => r.join('/')).join(' '),
+);
+
+// The drag was on the power chart; the cadence chart must report the same
+// segment. Its selected average excludes the stop, so it beats the whole-file
+// average, which does not.
+const cadence = await page.$$eval('.chart:nth-child(3) .chart-stats tbody tr', (rows) =>
+  rows.map((r) =>
+    [...r.querySelectorAll('td')].map((c) => Number.parseFloat((c.textContent ?? '').trim())),
+  ),
+);
+check(
+  'the selection applies to every chart',
+  cadence.every(([avg, , selAvg]) => selAvg > avg),
+  cadence.map((r) => r.join('/')).join(' '),
+);
+
+await page.mouse.dblclick(drag.x + drag.width * 0.5, drag.y + drag.height / 2);
+await page.waitForTimeout(600);
+check(
+  'double-click clears the selection',
+  (await page.$eval('#selection-info', (e) => (e.textContent ?? '').trim())) === '',
+);
+
 // A colour change has to reach the charts, the table and the map together.
 await page.$eval('.file:nth-child(2) .file-color', (el) => {
   /** @type {HTMLInputElement} */ (el).value = '#8e44ad';

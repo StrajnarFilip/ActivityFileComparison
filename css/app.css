@@ -491,6 +491,59 @@ h2 {
   min-width: 0;
 }
 
+.selection-info {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+/* Per-chart statistics, sitting directly under each chart's legend. */
+.chart-stats {
+  margin: 2px 0 14px;
+  overflow-x: auto;
+}
+
+.chart-stats table {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chart-stats th,
+.chart-stats td {
+  padding: 3px 12px 3px 0;
+  text-align: right;
+  font-weight: 400;
+}
+
+/* A shared minimum keeps the columns of every chart's table lined up with each
+   other, even though each table sizes itself. */
+.chart-stats th:not(.name),
+.chart-stats td {
+  min-width: 96px;
+}
+
+.chart-stats thead th {
+  font-size: 11px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.chart-stats th.name {
+  text-align: left;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 4px;
+}
+
+.chart-stats thead th.name {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .chart-note {
   margin: 0 0 8px;
   padding: 7px 10px;
