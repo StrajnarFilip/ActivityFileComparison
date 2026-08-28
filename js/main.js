@@ -8,7 +8,7 @@ import { buildActivity } from './activity.js';
 import { nextColor } from './colors.js';
 import { ChartStack } from './charts.js';
 import { TrackMap } from './map.js';
-import { renderFileList, renderSummary } from './ui.js';
+import { renderFileList, renderSummary, renderReferenceOptions } from './ui.js';
 import { fileSize } from './format.js';
 
 /** Colour changes come in a stream while the picker is dragged. */
@@ -19,6 +19,7 @@ const COLOUR_REDRAW_DELAY = 150;
  * @property {import('./model.js').Activity[]} activities
  * @property {import('./model.js').XMode} xMode
  * @property {import('./model.js').UnitSystem} units
+ * @property {string|null} referenceId  File the others are compared against.
  */
 
 /** @type {State} */
@@ -26,6 +27,7 @@ const state = {
   activities: [],
   xMode: 'elapsed',
   units: 'metric',
+  referenceId: null,
 };
 
 const dom = {
@@ -42,6 +44,7 @@ const dom = {
   fileInput: /** @type {HTMLInputElement} */ (required('file-input')),
   clearAll: required('clear-all'),
   fitMap: required('fit-map'),
+  reference: /** @type {HTMLSelectElement} */ (required('reference')),
 };
 
 /** @type {ChartStack|null} */
@@ -84,8 +87,14 @@ function start() {
     });
   }
 
+  dom.reference.addEventListener('change', () => {
+    state.referenceId = dom.reference.value || null;
+    render();
+  });
+
   dom.clearAll.addEventListener('click', () => {
     state.activities = [];
+    state.referenceId = null;
     render();
   });
 
@@ -132,16 +141,17 @@ function render() {
   dom.empty.hidden = hasFiles;
   dom.layout.hidden = !hasFiles;
 
-  renderFileList(dom.fileList, state.activities, state.units, {
+  renderFileList(dom.fileList, state.activities, state.units, state.referenceId, {
     onColor: setColor,
     onVisibility: setVisibility,
     onRemove: removeActivity,
     onHighlight: (id) => map?.highlight(id),
   });
   renderSummary(dom.summary, state.activities, state.units);
+  renderReferenceOptions(dom.reference, state.activities, state.referenceId);
 
   if (!hasFiles) {
-    charts?.render([], state.xMode, state.units);
+    charts?.render([], state.xMode, state.units, null);
     map?.render([]);
     return;
   }
@@ -158,7 +168,7 @@ function render() {
       },
     });
   }
-  charts.render(state.activities, state.xMode, state.units);
+  charts.render(state.activities, state.xMode, state.units, state.referenceId);
 
   if (!dom.mapPanel.hidden) {
     if (!map) map = new TrackMap(dom.map);
@@ -168,7 +178,7 @@ function render() {
 }
 
 function renderCharts() {
-  charts?.render(state.activities, state.xMode, state.units);
+  charts?.render(state.activities, state.xMode, state.units, state.referenceId);
 }
 
 /**
@@ -202,6 +212,7 @@ function setVisibility(id, visible) {
 /** @param {string} id */
 function removeActivity(id) {
   state.activities = state.activities.filter((a) => a.id !== id);
+  if (state.referenceId === id) state.referenceId = null;
   render();
 }
 

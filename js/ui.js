@@ -37,9 +37,10 @@ const CHANNEL_COLUMNS = {
  * @param {HTMLElement} container
  * @param {import('./model.js').Activity[]} activities
  * @param {import('./model.js').UnitSystem} units
+ * @param {string|null} referenceId
  * @param {FileHandlers} handlers
  */
-export function renderFileList(container, activities, units, handlers) {
+export function renderFileList(container, activities, units, referenceId, handlers) {
   container.replaceChildren();
 
   for (const activity of activities) {
@@ -62,10 +63,22 @@ export function renderFileList(container, activities, units, handlers) {
     const body = document.createElement('div');
     body.className = 'file-body';
 
+    // The name truncates but the badge must not, so they are separate boxes.
     const name = document.createElement('div');
     name.className = 'file-name';
-    name.textContent = activity.name;
     name.title = activity.name;
+
+    const nameText = document.createElement('span');
+    nameText.className = 'file-name-text';
+    nameText.textContent = activity.name;
+    name.append(nameText);
+
+    if (activity.id === referenceId) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = 'reference';
+      name.append(badge);
+    }
 
     const meta = document.createElement('div');
     meta.className = 'file-meta';
@@ -97,6 +110,31 @@ export function renderFileList(container, activities, units, handlers) {
     item.append(visible, color, body, remove);
     container.append(item);
   }
+}
+
+/**
+ * Keep the reference picker's options in step with the loaded files.
+ *
+ * @param {HTMLSelectElement} select
+ * @param {import('./model.js').Activity[]} activities
+ * @param {string|null} referenceId
+ */
+export function renderReferenceOptions(select, activities, referenceId) {
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = 'No reference';
+
+  select.replaceChildren(
+    none,
+    ...activities.map((activity) => {
+      const option = document.createElement('option');
+      option.value = activity.id;
+      option.textContent = activity.name;
+      return option;
+    }),
+  );
+  select.value = referenceId ?? '';
+  select.disabled = activities.length < 2;
 }
 
 /**

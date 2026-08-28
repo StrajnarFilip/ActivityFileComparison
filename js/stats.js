@@ -5,6 +5,10 @@
  * build — the file's usable x values plus the track index each one came from —
  * so a selected segment of the x axis maps to a contiguous run of samples that
  * can be summarised without touching the resampled data.
+ *
+ * Deviation from a reference file is the exception: comparing two files point
+ * by point needs them on a common x axis, which is exactly what the resampled
+ * grid the charts are drawn from already provides.
  */
 
 /** Sample intervals longer than this are a pause, and carry no weight. */
@@ -105,4 +109,57 @@ function firstAbove(x, value) {
     else high = mid;
   }
   return low;
+}
+
+/**
+ * How one file differs from the reference file, measured point by point on the
+ * shared grid. A positive mean means this file reads higher than the reference.
+ *
+ * @typedef {Object} Deviation
+ * @property {number} mean     Mean signed difference, in the channel's unit.
+ * @property {number} meanAbs  Mean absolute difference; how far apart they run
+ *   moment to moment, which a bias alone hides.
+ * @property {number} percent  `mean` as a percentage of the reference's mean.
+ * @property {number} count    Grid points where both files had a value.
+ */
+
+/** @type {Deviation} */
+export const NO_DEVIATION = { mean: NaN, meanAbs: NaN, percent: NaN, count: 0 };
+
+/**
+ * @param {(number|null)[]} values
+ * @param {(number|null)[]} reference
+ * @param {number} from  Grid index, inclusive.
+ * @param {number} to    Grid index, exclusive.
+ * @returns {Deviation}
+ */
+export function deviation(values, reference, from, to) {
+  let total = 0;
+  let absolute = 0;
+  let referenceTotal = 0;
+  let count = 0;
+
+  for (let i = from; i < to; i++) {
+    const value = values[i];
+    const base = reference[i];
+    if (value == null || base == null) continue;
+
+    const difference = value - base;
+    total += difference;
+    absolute += Math.abs(difference);
+    referenceTotal += base;
+    count += 1;
+  }
+
+  if (count === 0) return NO_DEVIATION;
+
+  // A reference that averages ~0 (power through a long stop, say) makes the
+  // percentage meaningless rather than merely large.
+  const referenceMean = referenceTotal / count;
+  return {
+    mean: total / count,
+    meanAbs: absolute / count,
+    percent: Math.abs(referenceMean) > 1e-9 ? (total / referenceTotal) * 100 : NaN,
+    count,
+  };
 }

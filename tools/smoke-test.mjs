@@ -189,6 +189,77 @@ check(
   (await page.$eval('#selection-info', (e) => (e.textContent ?? '').trim())) === '',
 );
 
+// Nominating a reference file adds deviation columns to every chart.
+const referenceOptions = await page.$$eval('#reference option', (els) =>
+  els.map((e) => e.textContent),
+);
+check(
+  'the reference picker lists every file',
+  referenceOptions.join('|') === ['No reference', ...SAMPLES].join('|'),
+  referenceOptions.join(', '),
+);
+
+await page.selectOption('#reference', { label: SAMPLES[0] });
+await page.waitForTimeout(900);
+check(
+  'the reference is marked in the file list',
+  (await page.$eval('.file .badge', (e) => e.textContent)) === 'reference',
+);
+const groups = await page.$$eval('.chart-stats th.group', (els) => els.map((e) => e.textContent));
+check(
+  'every chart gains a deviation group',
+  groups.length === 6 && groups.every((g) => g === `\u0394 vs ${SAMPLES[0]}`),
+  groups[0] ?? '(none)',
+);
+check(
+  'the reference file names itself as such',
+  (await page.$eval('.chart:first-child .reference-row .is-reference', (e) => e.textContent)) ===
+    'reference',
+);
+
+// The sample files are generated from one ride with known offsets: the watch
+// records heart rate 3.5 bpm high and the phone 2 bpm low. Recovering exactly
+// those numbers checks the whole path from parser to deviation.
+const heartRate = await page.$$eval('.chart:nth-child(2) .chart-stats tbody tr', (rows) =>
+  rows.map((r) => [...r.querySelectorAll('td')].map((c) => (c.textContent ?? '').trim())),
+);
+check(
+  'deviation recovers the offsets the sample files were built with',
+  heartRate[1][4] === '+3.5 bpm' && heartRate[2][4] === '\u22122.0 bpm',
+  `${heartRate[1][4]} / ${heartRate[2][4]}`,
+);
+
+// Deviation is measured over the selection when there is one.
+await page.locator('.chart .u-over').first().scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+const refDrag = await page.locator('.chart .u-over').first().boundingBox();
+if (!refDrag) throw new Error('no chart to drag on');
+await page.mouse.move(refDrag.x + refDrag.width * 0.55, refDrag.y + refDrag.height / 2);
+await page.mouse.down();
+await page.mouse.move(refDrag.x + refDrag.width * 0.7, refDrag.y + refDrag.height / 2, { steps: 8 });
+await page.mouse.move(refDrag.x + refDrag.width * 0.9, refDrag.y + refDrag.height / 2, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(800);
+check(
+  'the deviation group says when it covers a selection',
+  (await page.$eval('.chart-stats th.group', (e) => e.textContent ?? '')).endsWith('(selected)'),
+  await page.$eval('.chart-stats th.group', (e) => e.textContent ?? ''),
+);
+await page.mouse.dblclick(refDrag.x + refDrag.width * 0.5, refDrag.y + refDrag.height / 2);
+await page.waitForTimeout(600);
+
+// Hiding the reference leaves nothing to compare against.
+await page.uncheck('.file:nth-child(1) .file-visible');
+await page.waitForTimeout(800);
+check('hiding the reference withdraws the comparison', (await page.$$('.chart-stats th.group')).length === 0);
+await page.check('.file:nth-child(1) .file-visible');
+await page.waitForTimeout(800);
+check('showing it again restores the comparison', (await page.$$('.chart-stats th.group')).length === 6);
+
+await page.selectOption('#reference', '');
+await page.waitForTimeout(700);
+check('the reference can be cleared', (await page.$$('.chart-stats th.group')).length === 0);
+
 // A colour change has to reach the charts, the table and the map together.
 await page.$eval('.file:nth-child(2) .file-color', (el) => {
   /** @type {HTMLInputElement} */ (el).value = '#8e44ad';
@@ -242,9 +313,16 @@ check('hiding a file removes it from the table', (await page.$$('.summary tbody 
 await page.check('.file:nth-child(1) .file-visible');
 await page.waitForTimeout(400);
 
+await page.selectOption('#reference', { label: SAMPLES[2] });
+await page.waitForTimeout(700);
 await page.click('.file:nth-child(3) .file-remove');
-await page.waitForTimeout(600);
+await page.waitForTimeout(700);
 check('a file can be removed', (await page.$$('.file')).length === 2);
+check(
+  'removing the reference file clears the reference',
+  (await page.$eval('#reference', (e) => /** @type {HTMLSelectElement} */ (e).value)) === '' &&
+    (await page.$$('.chart-stats th.group')).length === 0,
+);
 
 await page.click('#clear-all');
 await page.waitForTimeout(300);

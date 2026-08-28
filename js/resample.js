@@ -118,6 +118,22 @@ export function makeGrid(min, max, count) {
 }
 
 /**
+ * The half-open range of grid indices covered by the x values `[min, max]`,
+ * or the whole grid when there is no range.
+ *
+ * @param {Grid} grid
+ * @param {{min: number, max: number}|null} range
+ * @returns {[number, number]}
+ */
+export function gridBounds(grid, range) {
+  if (!range || grid.step <= 0) return [0, grid.x.length];
+  const origin = grid.x[0];
+  const from = Math.max(0, Math.ceil((range.min - origin) / grid.step));
+  const to = Math.min(grid.x.length, Math.floor((range.max - origin) / grid.step) + 1);
+  return [from, Math.max(from, to)];
+}
+
+/**
  * Resample one channel onto the grid.
  *
  * @param {Source} source

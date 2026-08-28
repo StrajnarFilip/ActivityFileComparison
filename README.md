@@ -37,6 +37,20 @@ and maximum for that channel, both over the whole file and over the selected
 segment. Dragging across any chart selects a segment — all the charts follow, and
 every table updates — and double-clicking clears it.
 
+**Reference file.** Pick one file as the reference and every chart's table
+gains three more columns saying how far each of the other files runs from it,
+measured point by point over whatever the charts are currently showing:
+
+| Column | Meaning |
+| --- | --- |
+| mean | Average signed difference. Positive means this file reads higher. |
+| mean abs | Average absolute difference — how far apart they run moment to moment, which a bias alone hides. |
+| % | The mean as a percentage of the reference's own mean. |
+
+A power meter that reads consistently 2% high shows up as a small mean and a
+matching percentage; two that agree on average but disagree constantly show a
+mean near zero and a large `mean abs`.
+
 **X axis.** Three modes:
 
 | Mode | Use it when |
@@ -133,6 +147,12 @@ files, then checks that the derived totals agree across formats, that colours
 match between the charts and the table, that the cursor reads every file, that
 dragging a segment updates every chart's statistics, and that the axis, unit,
 visibility and removal controls work.
+
+The deviation check is the sharpest of these: the sample files are generated
+from one ride with known offsets applied per device, so the test asserts that
+the reference comparison recovers exactly those offsets (+3.5 bpm for the
+watch, −2.0 bpm for the phone) end to end, from the parsers through resampling
+to the table.
 
 ## Notes
 

@@ -8,12 +8,13 @@
  *
  * Dragging on any chart zooms all of them, and that shared x range doubles as
  * the selected segment: the statistics table under each chart reports both the
- * whole-file figures and the figures for the selection.
+ * whole-file figures and the figures for the selection. Nominating one file as
+ * the reference adds columns saying how far each of the others runs from it.
  */
 
 import { CHANNELS } from './model.js';
-import { xSeries, prepareSource, makeGrid, resample } from './resample.js';
-import { aggregate, rangeBounds, EMPTY } from './stats.js';
+import { xSeries, prepareSource, makeGrid, resample, gridBounds } from './resample.js';
+import { aggregate, rangeBounds, deviation, EMPTY } from './stats.js';
 import { duration, number } from './format.js';
 
 /** uPlot is loaded as a plain script, see index.html. @type {any} */
@@ -55,6 +56,9 @@ const MIN_GRID_POINTS = 400;
  * @typedef {Object} ChartEntry
  * @property {import('./model.js').Channel} spec
  * @property {HTMLElement} stats
+ * @property {(number|null)[][]} series  One resampled series per prepared file,
+ *   in display units — the same values the chart draws, and what the deviation
+ *   from the reference file is measured on.
  */
 
 /** @typedef {{min: number, max: number}} XRange */
@@ -96,6 +100,10 @@ export class ChartStack {
     this.xMode = 'elapsed';
     /** @type {import('./model.js').UnitSystem} */
     this.units = 'metric';
+    /** @type {import('./resample.js').Grid|null} */
+    this.grid = null;
+    /** Index into `prepared` of the reference file, -1 when there is none. */
+    this.reference = -1;
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(container);
@@ -109,8 +117,9 @@ export class ChartStack {
    * @param {import('./model.js').Activity[]} activities
    * @param {import('./model.js').XMode} xMode
    * @param {import('./model.js').UnitSystem} units
+   * @param {string|null} referenceId  File the others are measured against.
    */
-  render(activities, xMode, units) {
+  render(activities, xMode, units, referenceId) {
     this.destroyPlots();
     this.xMode = xMode;
     this.units = units;
@@ -148,6 +157,8 @@ export class ChartStack {
     );
 
     this.prepared = prepared;
+    this.grid = grid;
+    this.reference = prepared.findIndex(({ activity }) => activity.id === referenceId);
     this.fullRange = { min, max };
     this.selection = null;
     this.plotted = prepared.map((entry) => entry.activity);
@@ -171,14 +182,12 @@ export class ChartStack {
 
     this.building = true;
     this.entries = drawn.map((spec, position) => {
-      const data = [
-        grid.x,
-        ...prepared.map(({ activity, source }) =>
-          toSeries(resample(source, activity.track[spec.key], grid), (v) =>
-            spec.toDisplay(v, units),
-          ),
+      const series = prepared.map(({ activity, source }) =>
+        toSeries(resample(source, activity.track[spec.key], grid), (v) =>
+          spec.toDisplay(v, units),
         ),
-      ];
+      );
+      const data = [grid.x, ...series];
 
       const wrapper = document.createElement('section');
       wrapper.className = 'chart';
@@ -199,7 +208,7 @@ export class ChartStack {
       stats.className = 'chart-stats';
       wrapper.append(stats);
 
-      return { spec, stats };
+      return { spec, stats, series };
     });
     this.building = false;
 
@@ -240,28 +249,29 @@ export class ChartStack {
   /** Rebuild the statistics table under every chart. */
   renderStats() {
     for (const entry of this.entries) {
-      entry.stats.replaceChildren(this.statsTable(entry.spec));
+      entry.stats.replaceChildren(this.statsTable(entry));
     }
   }
 
   /**
-   * @param {import('./model.js').Channel} spec
+   * @param {ChartEntry} entry
    * @returns {HTMLElement}
    */
-  statsTable(spec) {
-    const unit = spec.unit(this.units);
+  statsTable(entry) {
+    const { spec } = entry;
     const table = document.createElement('table');
 
-    const head = document.createElement('tr');
-    head.append(headerCell(spec.label, 'name'));
-    for (const label of ['Avg', 'Max', 'Avg (selected)', 'Max (selected)']) {
-      head.append(headerCell(`${label}`));
-    }
-    table.createTHead().append(head);
+    // Deviation columns need something to compare against: a reference file
+    // that is still on screen, and at least one other file.
+    const comparing = this.reference >= 0 && this.prepared.length > 1;
+    const referenceActivity = comparing ? this.prepared[this.reference].activity : null;
+    const [from, to] = comparing && this.grid ? gridBounds(this.grid, this.selection) : [0, 0];
+
+    table.append(this.statsHead(spec, referenceActivity));
 
     const body = table.createTBody();
-    for (const { activity, source } of this.prepared) {
-      if (!activity.has[spec.key]) continue;
+    this.prepared.forEach(({ activity, source }, index) => {
+      if (!activity.has[spec.key]) return;
 
       const values = activity.track[spec.key];
       const whole = aggregate(source, values, activity.track.time, 0, source.x.length);
@@ -277,16 +287,72 @@ export class ChartStack {
       const row = document.createElement('tr');
       row.append(nameCell(activity));
       for (const value of [whole.avg, whole.max, selected.avg, selected.max]) {
-        const cell = document.createElement('td');
-        cell.textContent = Number.isFinite(value)
-          ? `${number(spec.toDisplay(value, this.units), spec.decimals)} ${unit}`
-          : '–';
-        row.append(cell);
+        row.append(valueCell(value, spec, this.units));
       }
+
+      if (!referenceActivity) {
+        body.append(row);
+        return;
+      }
+
+      if (activity === referenceActivity) {
+        const cell = document.createElement('td');
+        cell.colSpan = 3;
+        cell.className = 'is-reference';
+        cell.textContent = 'reference';
+        row.append(cell);
+        row.classList.add('reference-row');
+        body.append(row);
+        return;
+      }
+
+      const delta = deviation(entry.series[index], entry.series[this.reference], from, to);
+      row.append(
+        signedCell(delta.mean, spec, this.units),
+        magnitudeCell(delta.meanAbs, spec, this.units),
+        percentCell(delta.percent),
+      );
       body.append(row);
-    }
+    });
 
     return table;
+  }
+
+  /**
+   * @param {import('./model.js').Channel} spec
+   * @param {import('./model.js').Activity|null} reference
+   * @returns {HTMLTableSectionElement}
+   */
+  statsHead(spec, reference) {
+    const head = document.createElement('thead');
+    const top = document.createElement('tr');
+    const plain = ['Avg', 'Max', 'Avg (selected)', 'Max (selected)'];
+
+    const label = headerCell(spec.label, 'name');
+    const columns = [label, ...plain.map((text) => headerCell(text))];
+    if (reference) for (const cell of columns) cell.rowSpan = 2;
+    top.append(...columns);
+
+    if (!reference) {
+      head.append(top);
+      return head;
+    }
+
+    const group = headerCell(
+      `\u0394 vs ${reference.name}${this.selection ? ' (selected)' : ''}`,
+      'group',
+    );
+    group.colSpan = 3;
+    group.title =
+      'Difference from the reference file, point by point over the range shown. ' +
+      'Positive means this file reads higher.';
+    top.append(group);
+
+    const second = document.createElement('tr');
+    second.append(...['mean', 'mean abs', '%'].map((text) => headerCell(text, 'sub')));
+
+    head.append(top, second);
+    return head;
   }
 
   /** @returns {string} Description of the selected segment, empty if none. */
@@ -473,6 +539,76 @@ function headerCell(text, className) {
   cell.scope = 'col';
   cell.textContent = text;
   if (className) cell.className = className;
+  return cell;
+}
+
+/**
+ * @param {number} value  In the channel's SI unit, or NaN.
+ * @param {import('./model.js').Channel} spec
+ * @param {import('./model.js').UnitSystem} units
+ * @returns {HTMLTableCellElement}
+ */
+function valueCell(value, spec, units) {
+  const cell = document.createElement('td');
+  cell.textContent = Number.isFinite(value)
+    ? `${number(spec.toDisplay(value, units), spec.decimals)} ${spec.unit(units)}`
+    : '\u2013';
+  return cell;
+}
+
+/**
+ * A difference, already in display units, shown with an explicit sign so that
+ * "reads high" and "reads low" are distinguishable at a glance.
+ *
+ * @param {number} value
+ * @param {import('./model.js').Channel} spec
+ * @param {import('./model.js').UnitSystem} units
+ * @returns {HTMLTableCellElement}
+ */
+function signedCell(value, spec, units) {
+  const cell = document.createElement('td');
+  if (!Number.isFinite(value)) {
+    cell.textContent = '\u2013';
+    return cell;
+  }
+  // Differences are small, so they get one more decimal than the raw values.
+  const decimals = Math.max(spec.decimals, 1);
+  cell.textContent = `${value > 0 ? '+' : value < 0 ? '\u2212' : ''}${number(
+    Math.abs(value),
+    decimals,
+  )} ${spec.unit(units)}`;
+  cell.className = value > 0 ? 'delta-high' : value < 0 ? 'delta-low' : '';
+  return cell;
+}
+
+/**
+ * A magnitude that is already in display units, so it only needs formatting.
+ *
+ * @param {number} value
+ * @param {import('./model.js').Channel} spec
+ * @param {import('./model.js').UnitSystem} units
+ * @returns {HTMLTableCellElement}
+ */
+function magnitudeCell(value, spec, units) {
+  const cell = document.createElement('td');
+  cell.textContent = Number.isFinite(value)
+    ? `${number(value, Math.max(spec.decimals, 1))} ${spec.unit(units)}`
+    : '\u2013';
+  return cell;
+}
+
+/**
+ * @param {number} value
+ * @returns {HTMLTableCellElement}
+ */
+function percentCell(value) {
+  const cell = document.createElement('td');
+  if (!Number.isFinite(value)) {
+    cell.textContent = '\u2013';
+    return cell;
+  }
+  cell.textContent = `${value > 0 ? '+' : value < 0 ? '\u2212' : ''}${number(Math.abs(value), 1)}%`;
+  cell.className = value > 0 ? 'delta-high' : value < 0 ? 'delta-low' : '';
   return cell;
 }
 

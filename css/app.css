@@ -19,6 +19,10 @@
 
   --chart-axis: #6b7280;
   --chart-grid: #e8eaed;
+
+  /* Reads high / reads low against the reference file. */
+  --delta-high: #b3541e;
+  --delta-low: #1a6b8f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -37,6 +41,9 @@
 
     --chart-axis: #99a3ad;
     --chart-grid: #2e343a;
+
+    --delta-high: #e08b4f;
+    --delta-low: #6cb6d9;
   }
 }
 
@@ -383,8 +390,15 @@ h2 {
 }
 
 .file-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   font-size: 13px;
   font-weight: 500;
+}
+
+.file-name-text {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -542,6 +556,74 @@ h2 {
 .chart-stats thead th.name {
   color: var(--text);
   font-weight: 600;
+}
+
+.reference-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.reference-picker select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-alt);
+  color: var(--text);
+  font: inherit;
+}
+
+.reference-picker select:disabled {
+  opacity: 0.5;
+}
+
+.badge {
+  display: inline-block;
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  vertical-align: 1px;
+}
+
+/* Deviation columns. */
+.chart-stats th.group {
+  text-align: center;
+  border-left: 1px solid var(--border);
+}
+
+.chart-stats th.sub {
+  font-weight: 400;
+  font-style: italic;
+}
+
+.chart-stats .reference-row th.name {
+  font-weight: 600;
+}
+
+.chart-stats .is-reference {
+  text-align: center;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.chart-stats .delta-high {
+  color: var(--delta-high);
+}
+
+.chart-stats .delta-low {
+  color: var(--delta-low);
 }
 
 .chart-note {
