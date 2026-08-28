@@ -1,0 +1,18 @@
+{
+  "//": "Type-checks the JSDoc annotations. Editors pick this up automatically; run `npm run check` for the same check on the command line. The app itself needs no build step.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true
+  },
+  "include": ["js/**/*.js"]
+}
