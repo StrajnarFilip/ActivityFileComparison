@@ -26,11 +26,23 @@
           <span class="control-label" id="x-axis-label">X axis</span>
           <div class="segmented" role="group" aria-labelledby="x-axis-label">
             <input type="radio" name="x-mode" id="x-elapsed" value="elapsed" checked />
-            <label for="x-elapsed">Elapsed</label>
+            <label
+              for="x-elapsed"
+              title="Each file measured from its own start, so recordings made on different days line up"
+              >Elapsed</label
+            >
             <input type="radio" name="x-mode" id="x-clock" value="clock" />
-            <label for="x-clock">Clock</label>
+            <label
+              for="x-clock"
+              title="Absolute time, so devices that recorded at different times of day are laid out on one timeline"
+              >Time of day</label
+            >
             <input type="radio" name="x-mode" id="x-dist" value="dist" />
-            <label for="x-dist">Distance</label>
+            <label
+              for="x-dist"
+              title="Distance from the start of each file, for comparing attempts at the same route"
+              >Distance</label
+            >
           </div>
         </div>
 

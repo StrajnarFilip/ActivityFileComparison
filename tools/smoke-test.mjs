@@ -8,6 +8,7 @@
  */
 
 import { chromium } from 'playwright';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from './serve.mjs';
@@ -356,6 +357,61 @@ check(
 await page.click('#clear-all');
 await page.waitForTimeout(300);
 
+// Files recorded at different times of day: the elapsed axis stacks them from
+// zero, and has to say so; the time-of-day axis lays them out on one timeline
+// with each line only where its file has data.
+await page.click('label[for="x-elapsed"]');
+await page.setInputFiles('#file-input', join(ROOT, 'testdata', SAMPLES[0]));
+await page.waitForTimeout(800);
+await page.setInputFiles('#file-input', {
+  name: 'an-hour-later.tcx',
+  mimeType: 'application/vnd.garmin.tcx+xml',
+  buffer: Buffer.from(await shiftedByAnHour(SAMPLES[1])),
+});
+await page.waitForTimeout(1200);
+
+const staggerNote = await page
+  .$eval('.chart-note', (e) => (e.textContent ?? '').trim())
+  .catch(() => '');
+check(
+  'the elapsed axis explains that it stacks files recorded hours apart',
+  staggerNote.includes('1:00:00 apart') && staggerNote.includes('Time of day'),
+  staggerNote || '(no note)',
+);
+
+await page.click('label[for="x-clock"]');
+await page.waitForTimeout(1000);
+check('the time-of-day axis needs no such warning', (await page.$$('.chart-note')).length === 0);
+
+await page.locator('.chart .u-over').first().scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+const timeline = await page.locator('.chart .u-over').first().boundingBox();
+if (!timeline) throw new Error('no chart to hover');
+
+/** Values each file reports at a fraction across the shared timeline. */
+const readAt = async (/** @type {number} */ fraction) => {
+  await page.mouse.move(
+    timeline.x + timeline.width * fraction,
+    timeline.y + timeline.height / 2,
+  );
+  await page.waitForTimeout(250);
+  const values = await page.$$eval('.chart:first-child .u-legend .u-value', (els) =>
+    els.map((e) => (e.textContent ?? '').trim()),
+  );
+  return values.slice(1);
+};
+
+const [atStart, atEnd] = [await readAt(0.06), await readAt(0.94)];
+check(
+  'each file is drawn only where it has data',
+  /\d/.test(atStart[0]) && atStart[1] === '–' && atEnd[0] === '–' && /\d/.test(atEnd[1]),
+  `start: ${atStart.join(' | ')}   end: ${atEnd.join(' | ')}`,
+);
+
+await page.click('#clear-all');
+await page.click('label[for="x-elapsed"]');
+await page.waitForTimeout(400);
+
 await page.setInputFiles('#file-input', {
   name: 'notes.txt',
   mimeType: 'text/plain',
@@ -371,6 +427,22 @@ server.close();
 
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);
+
+/**
+ * A sample file with every timestamp moved on by an hour, standing in for a
+ * device that recorded the same route later in the day.
+ *
+ * @param {string} name
+ * @returns {Promise<string>}
+ */
+async function shiftedByAnHour(name) {
+  const text = await readFile(join(ROOT, 'testdata', name), 'utf8');
+  return text.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, (stamp) => {
+    const moved = new Date(stamp);
+    moved.setUTCHours(moved.getUTCHours() + 1);
+    return moved.toISOString().replace('.000Z', 'Z');
+  });
+}
 
 /** A GPX route: positions and elevation, but no times. */
 function routeWithoutTimestamps() {

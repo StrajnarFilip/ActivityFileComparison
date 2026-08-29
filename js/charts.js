@@ -31,6 +31,13 @@ const Y_AXIS_SIZE = 58;
 const X_AXIS_SIZE = 34;
 const X_AXIS_SIZE_HIDDEN = 12;
 
+/**
+ * How far apart file start times have to be before the elapsed axis is worth
+ * explaining. Devices started within a couple of minutes of each other are
+ * doing the same session, and lining them up from zero is what is wanted.
+ */
+const STAGGER_NOTICE_SECONDS = 120;
+
 /** Upper bound on grid points; more than this is invisible on any screen. */
 const MAX_GRID_POINTS = 8000;
 const MIN_GRID_POINTS = 400;
@@ -142,19 +149,22 @@ export class ChartStack {
 
     let min = Infinity;
     let max = -Infinity;
-    let longest = 0;
+    let densest = 0;
     for (const { source } of prepared) {
-      min = Math.min(min, source.x[0]);
-      max = Math.max(max, source.x[source.x.length - 1]);
-      longest = Math.max(longest, source.x.length);
+      const first = source.x[0];
+      const last = source.x[source.x.length - 1];
+      min = Math.min(min, first);
+      max = Math.max(max, last);
+      if (last > first) densest = Math.max(densest, source.x.length / (last - first));
     }
     if (!(max > min)) max = min + 1;
 
-    const grid = makeGrid(
-      min,
-      max,
-      Math.min(MAX_GRID_POINTS, Math.max(MIN_GRID_POINTS, longest)),
-    );
+    // Size the grid from the finest sampling of any file spread across the whole
+    // span, rather than from the longest file's sample count. Files recorded at
+    // different times of day span far more than any one of them covers, and
+    // counting samples alone would then quietly halve everyone's resolution.
+    const wanted = densest > 0 ? Math.ceil(densest * (max - min)) : MIN_GRID_POINTS;
+    const grid = makeGrid(min, max, Math.min(MAX_GRID_POINTS, Math.max(MIN_GRID_POINTS, wanted)));
 
     this.prepared = prepared;
     this.grid = grid;
@@ -179,6 +189,12 @@ export class ChartStack {
     // leaving it out.
     const excluded = visible.filter((a) => !prepared.some((entry) => entry.activity === a));
     if (excluded.length > 0) this.container.append(exclusionNote(excluded, xMode));
+
+    // Elapsed puts every file at zero, which silently stacks recordings that
+    // actually happened hours apart. Say so, and point at the axis that does
+    // lay them out on one timeline.
+    const stagger = xMode === 'elapsed' ? startSpread(prepared) : 0;
+    if (stagger > STAGGER_NOTICE_SECONDS) this.container.append(staggerNote(stagger));
 
     this.building = true;
     this.entries = drawn.map((spec, position) => {
@@ -631,12 +647,40 @@ function nameCell(activity) {
 }
 
 /**
+ * Seconds between the earliest and latest start time among the files.
+ *
+ * @param {PreparedActivity[]} prepared
+ * @returns {number}
+ */
+function startSpread(prepared) {
+  const starts = prepared
+    .map(({ activity }) => activity.track.time[0])
+    .filter((t) => Number.isFinite(t));
+  if (starts.length < 2) return 0;
+  return Math.max(...starts) - Math.min(...starts);
+}
+
+/**
+ * @param {number} spread  Seconds between the earliest and latest start.
+ * @returns {HTMLElement}
+ */
+function staggerNote(spread) {
+  const note = document.createElement('p');
+  note.className = 'chart-note';
+  note.textContent =
+    `These files were recorded ${duration(spread)} apart. The elapsed axis measures each ` +
+    'file from its own start, so they are stacked on top of each other here — switch the x ' +
+    'axis to Time of day to lay them out on one timeline.';
+  return note;
+}
+
+/**
  * @param {import('./model.js').Activity[]} excluded
  * @param {import('./model.js').XMode} xMode
  * @returns {HTMLElement}
  */
 function exclusionNote(excluded, xMode) {
-  const axis = xMode === 'dist' ? 'distance' : xMode === 'clock' ? 'clock time' : 'elapsed time';
+  const axis = xMode === 'dist' ? 'distance' : xMode === 'clock' ? 'time of day' : 'elapsed time';
   const reason = xMode === 'dist' ? 'no distance data' : 'no timestamps';
   const note = document.createElement('p');
   note.className = 'chart-note';
@@ -695,7 +739,7 @@ function xTickValues(xMode) {
  */
 function xLabel(xMode, units) {
   if (xMode === 'elapsed') return 'Elapsed';
-  if (xMode === 'clock') return 'Time';
+  if (xMode === 'clock') return 'Time of day';
   return units === 'imperial' ? 'Distance (mi)' : 'Distance (km)';
 }
 

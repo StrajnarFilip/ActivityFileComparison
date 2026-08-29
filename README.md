@@ -51,13 +51,17 @@ A power meter that reads consistently 2% high shows up as a small mean and a
 matching percentage; two that agree on average but disagree constantly show a
 mean near zero and a large `mean abs`.
 
-**X axis.** Three modes:
+**X axis.** Three modes, differing in where each file's zero sits:
 
-| Mode | Use it when |
-| --- | --- |
-| Elapsed | Comparing rides that did not start at the same moment. |
-| Clock | Comparing several devices that recorded the same session simultaneously. |
-| Distance | Comparing attempts at the same route. |
+| Mode | Zero | Use it when |
+| --- | --- | --- |
+| Elapsed | Each file's own start | Comparing recordings made at different times — two attempts at the same climb line up from zero regardless of when they happened. |
+| Time of day | Absolute time | Comparing devices that recorded around the same time. Files that started an hour apart sit an hour apart, the axis spans from the earliest start to the latest finish, and each line is drawn only where its own file has data. |
+| Distance | Each file's own start | Comparing attempts at the same route. |
+
+Elapsed stacking everything at zero is the point of it, but it does hide a real
+time offset. When the loaded files started more than a couple of minutes apart,
+the charts say so and point at Time of day.
 
 **Map.** All tracks on one Leaflet map, in matching colours, with a white casing
 under every line so they stay legible on the tiles. Because the files being
@@ -84,6 +88,11 @@ every file is resampled onto one evenly spaced grid:
 - cells further than a gap threshold (six times the file's own median sample
   interval) from any sample are left empty, so a pause shows as a real gap
   instead of a line drawn straight across it.
+
+The grid is sized from the finest sampling of any loaded file spread across the
+whole span, rather than from the longest file's sample count — otherwise files
+recorded hours apart, which together span far more than any one of them covers,
+would quietly cost every file its resolution.
 
 Some values are derived when a file does not record them: distance from GPS
 positions when there is no distance field, speed from distance over time, and
